@@ -23,7 +23,8 @@ xray_queries:
 
   # 5. X (Twitter) — Silicon & Architecture Teams
   - 'site:x.com ("hiring" OR "open role") ("RTL" OR "Design Verification" OR "Computer Architecture" OR "silicon") ("NVIDIA" OR "ARM" OR "AMD" OR "Qualcomm" OR "Google" OR "Microsoft")'
-
+  # 6
+  - '(site:reddit.com/r/chipdesign OR site:reddit.com/r/VLSI OR site:reddit.com/r/FPGA) ("hiring" OR "referral" OR "opening")'
 subreddits:
   - "chipdesign"
   - "VLSI"
