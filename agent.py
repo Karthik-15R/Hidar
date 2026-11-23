@@ -151,6 +151,7 @@ def run():
     conn = init_db()
     all_posts = fetch_xray_posts() + fetch_reddit_posts() + fetch_discord_posts()
     print(f"Fetched {len(all_posts)} clean posts across sources.")
+    requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", json={"chat_id": TG_CHAT_ID, "text": f"Radar ran: {len(all_posts)} posts checked."})
     for post in all_posts:
         if is_seen(conn, post["url"]):
             continue
