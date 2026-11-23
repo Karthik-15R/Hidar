@@ -120,17 +120,18 @@ def evaluate_post(post):
 
 def send_telegram_alert(post, evaluation):
     msg = (
-        f"{evaluation.get('tag', '⚡ LEAD')} | *{post['source']}*\n\n"
-        f"*{post['title']}*\n"
-        f"💡 *Why:* {evaluation['reason']}\n\n"
-        f"✉️ *Draft DM (Tap to copy):*\n`{evaluation['draft_dm']}`\n\n"
-        f"🔗 [Open Post]({post['url']})"
+        f"{evaluation.get('tag', '⚡ LEAD')} | {post['source']}\n\n"
+        f"{post['title']}\n"
+        f"Why: {evaluation['reason']}\n\n"
+        f"Draft DM:\n{evaluation['draft_dm']}\n\n"
+        f"Link: {post['url']}"
     )
-    requests.post(
+    resp = requests.post(
         f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
-        json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": True},
+        json={"chat_id": TG_CHAT_ID, "text": msg, "disable_web_page_preview": True},
         timeout=10
     )
+    print(f"[TELEGRAM] Status: {resp.status_code} | Response: {resp.text}")
 
 def run():
     conn = init_db()
@@ -141,9 +142,9 @@ def run():
             continue
         try:
             result = evaluate_post(post)
+            print(f"[EVAL] match={result.get('is_match')} | {post['source']} | {post['title'][:60]}")
             if result.get("is_match"):
                 send_telegram_alert(post, result)
-                print(f"[ALERT SENT] {post['source']}: {post['title']}")
         except Exception as e:
             print(f"[ERROR] {post['url']} -> {e}")
     conn.close()
