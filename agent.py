@@ -19,6 +19,14 @@ DISCORD_TOKEN  = os.environ.get("DISCORD_TOKEN", "")
 # Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after you see clean [EVAL] logs
 SEARCH_WINDOW = "qdr:d"
 
+# Fallback chain: tries the fastest/least congested free-tier models first
+GEMINI_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-4-hydrogen",
+    "gemini-3.6-flash",
+    "gemini-3.8-flash",
+]
+
 llm_client = genai.Client(api_key=GEMINI_API_KEY)
 
 def init_db():
@@ -101,7 +109,7 @@ def fetch_discord_posts():
     return posts
 
 def evaluate_posts_batch(posts):
-    """Evaluates all new posts in ONE Gemini API call to stay under the 5 RPM free limit."""
+    """Evaluates all new posts in ONE API call, falling back across models if one hits 503/429."""
     formatted_posts = [
         {"id": i, "source": p["source"], "title": p["title"], "text": p["text"]}
         for i, p in enumerate(posts)
@@ -130,21 +138,25 @@ def evaluate_posts_batch(posts):
     Return a JSON array with one object per post:
     [{{"id": int, "is_match": bool, "tag": "string", "reason": "1-line summary", "draft_dm": "string"}}]
     """
-    for attempt in range(3):
+
+    last_error = None
+    for model_name in GEMINI_MODELS:
         try:
+            print(f"[LLM] Trying {model_name}...")
             resp = llm_client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
+            print(f"[LLM] Success with {model_name}")
             return json.loads(resp.text)
         except Exception as e:
-            if ("503" in str(e) or "429" in str(e)) and attempt < 2:
-                wait = 25 * (attempt + 1)
-                print(f"[RETRY] Hit temporary limit, waiting {wait}s...")
-                time.sleep(wait)
-                continue
-            raise
+            last_error = e
+            print(f"[LLM] {model_name} failed: {e}")
+            time.sleep(3)
+            continue
+
+    raise last_error
 
 def send_telegram_alert(post, evaluation):
     msg = (
