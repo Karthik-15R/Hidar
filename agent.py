@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import sqlite3
 import yaml
@@ -15,7 +16,7 @@ TG_BOT_TOKEN   = os.environ["TG_BOT_TOKEN"]
 TG_CHAT_ID     = os.environ["TG_CHAT_ID"]
 DISCORD_TOKEN  = os.environ.get("DISCORD_TOKEN", "")
 
-# Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after your first test run
+# Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after your first test alert
 SEARCH_WINDOW = "qdr:d"
 
 llm_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -26,13 +27,13 @@ def init_db():
     conn.commit()
     return conn
 
-def is_new(conn, url):
+def is_seen(conn, url):
     cur = conn.execute("SELECT 1 FROM seen WHERE url = ?", (url,))
-    if cur.fetchone():
-        return False
-    conn.execute("INSERT INTO seen (url) VALUES (?)", (url,))
+    return cur.fetchone() is not None
+
+def mark_seen(conn, url):
+    conn.execute("INSERT OR IGNORE INTO seen (url) VALUES (?)", (url,))
     conn.commit()
-    return True
 
 def fetch_xray_posts():
     posts = []
@@ -42,12 +43,18 @@ def fetch_xray_posts():
         resp = requests.post("https://google.serper.dev/search", headers=headers, json=payload, timeout=15)
         if resp.status_code == 200:
             for item in resp.json().get("organic", []):
-                source = "LinkedIn" if "linkedin.com" in item["link"] else "X"
+                link = item.get("link", "")
+                # Skip Google redirects and non-post X profile tabs
+                if "google.com/goto" in link or link.endswith(("/all", "/with_replies")):
+                    continue
+                if "x.com" in link and "/status/" not in link:
+                    continue
+                source = "LinkedIn" if "linkedin.com" in link else "X"
                 posts.append({
                     "source": source,
                     "title": item.get("title", ""),
                     "text": item.get("snippet", ""),
-                    "url": item["link"]
+                    "url": link
                 })
     return posts
 
@@ -111,12 +118,19 @@ def evaluate_post(post):
 
     Return JSON: {{"is_match": bool, "tag": "string", "reason": "1-line summary", "draft_dm": "string"}}
     """
-    resp = llm_client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json")
-    )
-    return json.loads(resp.text)
+    for attempt in range(3):
+        try:
+            resp = llm_client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+            )
+            return json.loads(resp.text)
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                time.sleep(5 * (attempt + 1))  # Wait 5s, then 10s
+                continue
+            raise
 
 def send_telegram_alert(post, evaluation):
     msg = (
@@ -136,12 +150,13 @@ def send_telegram_alert(post, evaluation):
 def run():
     conn = init_db()
     all_posts = fetch_xray_posts() + fetch_reddit_posts() + fetch_discord_posts()
-    print(f"Fetched {len(all_posts)} posts across sources.")
+    print(f"Fetched {len(all_posts)} clean posts across sources.")
     for post in all_posts:
-        if not is_new(conn, post["url"]):
+        if is_seen(conn, post["url"]):
             continue
         try:
             result = evaluate_post(post)
+            mark_seen(conn, post["url"])  # Only mark seen AFTER Gemini succeeds
             print(f"[EVAL] match={result.get('is_match')} | {post['source']} | {post['title'][:60]}")
             if result.get("is_match"):
                 send_telegram_alert(post, result)
