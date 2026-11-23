@@ -16,7 +16,7 @@ TG_BOT_TOKEN   = os.environ["TG_BOT_TOKEN"]
 TG_CHAT_ID     = os.environ["TG_CHAT_ID"]
 DISCORD_TOKEN  = os.environ.get("DISCORD_TOKEN", "")
 
-# Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after your first test alert
+# Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after you see clean [EVAL] logs
 SEARCH_WINDOW = "qdr:d"
 
 llm_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -44,12 +44,16 @@ def fetch_xray_posts():
         if resp.status_code == 200:
             for item in resp.json().get("organic", []):
                 link = item.get("link", "")
-                # Skip Google redirects and non-post X profile tabs
                 if "google.com/goto" in link or link.endswith(("/all", "/with_replies")):
                     continue
                 if "x.com" in link and "/status/" not in link:
                     continue
-                source = "LinkedIn" if "linkedin.com" in link else "X"
+                if "linkedin.com" in link:
+                    source = "LinkedIn"
+                elif "reddit.com" in link:
+                    source = "Reddit"
+                else:
+                    source = "X"
                 posts.append({
                     "source": source,
                     "title": item.get("title", ""),
@@ -63,16 +67,19 @@ def fetch_reddit_posts():
     headers = {"User-Agent": "HiringRadarBot/1.0"}
     for sub in CONFIG.get("subreddits", []):
         url = f"https://www.reddit.com/r/{sub}/new.json?limit=10"
-        resp = requests.get(url, headers=headers, timeout=15)
-        if resp.status_code == 200:
-            for child in resp.json()["data"]["children"]:
-                data = child["data"]
-                posts.append({
-                    "source": f"Reddit (r/{sub})",
-                    "title": data.get("title", ""),
-                    "text": data.get("selftext", "")[:600],
-                    "url": f"https://reddit.com{data['permalink']}"
-                })
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                for child in resp.json()["data"]["children"]:
+                    data = child["data"]
+                    posts.append({
+                        "source": f"Reddit (r/{sub})",
+                        "title": data.get("title", ""),
+                        "text": data.get("selftext", "")[:600],
+                        "url": f"https://reddit.com{data['permalink']}"
+                    })
+        except Exception:
+            continue
     return posts
 
 def fetch_discord_posts():
@@ -93,7 +100,13 @@ def fetch_discord_posts():
                 })
     return posts
 
-def evaluate_post(post):
+def evaluate_posts_batch(posts):
+    """Evaluates all new posts in ONE Gemini API call to stay under the 5 RPM free limit."""
+    formatted_posts = [
+        {"id": i, "source": p["source"], "title": p["title"], "text": p["text"]}
+        for i, p in enumerate(posts)
+    ]
+
     prompt = f"""
     You are a strict semiconductor job-hunting filter.
     Candidate Profile:
@@ -104,19 +117,18 @@ def evaluate_post(post):
     - Target Companies: {CONFIG['profile']['target_companies']}
     - Locations: {CONFIG['profile']['locations']}
 
-    Evaluate this post:
-    Source: {post['source']}
-    Title: {post['title']}
-    Content: {post['text']}
+    Evaluate this JSON list of posts:
+    {json.dumps(formatted_posts)}
 
     Strict Filtering Rules:
     1. REJECT if the author is a job seeker ("I am looking for...", "#opentowork") or a VLSI coaching/training institute.
     2. REJECT if the role explicitly requires 3+ years of experience (e.g., Senior, Staff, Principal, 5+ YoE).
     3. ACCEPT if it is a real opening/referral for 0-2 YoE, 2026 grads, or unspecified experience in Primary or Secondary roles.
     4. Set tag to "🔥 PRIMARY + ARCH" if it's RTL/DV + Computer Architecture, "⚡ PRIMARY" for RTL/DV, or "📌 SECONDARY" for Arch/DFT/STA.
-    5. Draft a sharp, 3-line cold DM/comment tailored to the post.
+    5. Draft a sharp, 3-line cold DM/comment tailored to the post (leave empty string if is_match is false).
 
-    Return JSON: {{"is_match": bool, "tag": "string", "reason": "1-line summary", "draft_dm": "string"}}
+    Return a JSON array with one object per post:
+    [{{"id": int, "is_match": bool, "tag": "string", "reason": "1-line summary", "draft_dm": "string"}}]
     """
     for attempt in range(3):
         try:
@@ -127,8 +139,10 @@ def evaluate_post(post):
             )
             return json.loads(resp.text)
         except Exception as e:
-            if "503" in str(e) and attempt < 2:
-                time.sleep(5 * (attempt + 1))  # Wait 5s, then 10s
+            if ("503" in str(e) or "429" in str(e)) and attempt < 2:
+                wait = 25 * (attempt + 1)
+                print(f"[RETRY] Hit temporary limit, waiting {wait}s...")
+                time.sleep(wait)
                 continue
             raise
 
@@ -150,19 +164,27 @@ def send_telegram_alert(post, evaluation):
 def run():
     conn = init_db()
     all_posts = fetch_xray_posts() + fetch_reddit_posts() + fetch_discord_posts()
-    print(f"Fetched {len(all_posts)} clean posts across sources.")
-    requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", json={"chat_id": TG_CHAT_ID, "text": f"Radar ran: {len(all_posts)} posts checked."})
-    for post in all_posts:
-        if is_seen(conn, post["url"]):
-            continue
-        try:
-            result = evaluate_post(post)
-            mark_seen(conn, post["url"])  # Only mark seen AFTER Gemini succeeds
-            print(f"[EVAL] match={result.get('is_match')} | {post['source']} | {post['title'][:60]}")
-            if result.get("is_match"):
-                send_telegram_alert(post, result)
-        except Exception as e:
-            print(f"[ERROR] {post['url']} -> {e}")
+    new_posts = [p for p in all_posts if not is_seen(conn, p["url"])]
+    print(f"Fetched {len(all_posts)} clean posts ({len(new_posts)} new).")
+
+    if not new_posts:
+        conn.close()
+        return
+
+    try:
+        results = evaluate_posts_batch(new_posts)
+        for res in results:
+            idx = res.get("id")
+            if idx is None or idx >= len(new_posts):
+                continue
+            post = new_posts[idx]
+            mark_seen(conn, post["url"])
+            print(f"[EVAL] match={res.get('is_match')} | {post['source']} | {post['title'][:60]}")
+            if res.get("is_match"):
+                send_telegram_alert(post, res)
+    except Exception as e:
+        print(f"[ERROR] Batch evaluation failed -> {e}")
+
     conn.close()
 
 if __name__ == "__main__":
