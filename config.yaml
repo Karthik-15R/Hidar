@@ -1,0 +1,34 @@
+# config.yaml
+profile:
+  primary_roles: "RTL Design Engineer, Design Verification (DV) Engineer, Digital Design Engineer"
+  secondary_roles: "Computer Architect, Microarchitecture Engineer, DFT Engineer, STA Engineer"
+  bonus_domain: "Computer Architecture (CPU, GPU, Cache, Coherency, Interconnect, NoC, RISC-V, SoC)"
+  experience: "0-2 years (2026 graduate / fresher / entry-level / Engineer I)"
+  target_companies: "NVIDIA, ARM, Qualcomm, Marvell, Broadcom, AMD, Texas Instruments, Microchip, Google, Microsoft, Samsung Semiconductor (SSIR)"
+  locations: "Bengaluru, Chennai, Hyderabad, Noida, Pune, India"
+
+# Split into <32-word queries so Google never truncates your keywords
+xray_queries:
+  # 1. PRIMARY (RTL + DV) @ MNC Group A
+  - 'site:linkedin.com/posts ("hiring" OR "opening" OR "referral") ("RTL" OR "Design Verification" OR "SystemVerilog") ("NVIDIA" OR "ARM" OR "Qualcomm" OR "AMD" OR "Broadcom" OR "Marvell") -"open to work"'
+
+  # 2. PRIMARY (RTL + DV) @ MNC Group B
+  - 'site:linkedin.com/posts ("hiring" OR "opening" OR "referral") ("RTL" OR "Design Verification" OR "SystemVerilog") ("Google" OR "Microsoft" OR "Samsung" OR "Texas Instruments" OR "Microchip") -"open to work"'
+
+  # 3. SECONDARY (Arch + DFT + STA) @ Target MNCs
+  - 'site:linkedin.com/posts ("hiring" OR "opening" OR "referral") ("Computer Architecture" OR "Microarchitecture" OR "DFT" OR "STA") ("NVIDIA" OR "ARM" OR "Qualcomm" OR "AMD" OR "Google" OR "Samsung" OR "Broadcom" OR "Marvell") -"open to work"'
+
+  # 4. ENTRY-LEVEL / 2026 GRAD CATCH-ALL (Any product company in India)
+  - 'site:linkedin.com/posts ("hiring" OR "referring") ("RTL" OR "Design Verification") ("2026" OR "fresher" OR "0-2" OR "entry level") ("Bengaluru" OR "Hyderabad" OR "Chennai") -"open to work"'
+
+  # 5. X (Twitter) — Silicon & Architecture Teams
+  - 'site:x.com ("hiring" OR "open role") ("RTL" OR "Design Verification" OR "Computer Architecture" OR "silicon") ("NVIDIA" OR "ARM" OR "AMD" OR "Qualcomm" OR "Google" OR "Microsoft")'
+
+subreddits:
+  - "chipdesign"
+  - "VLSI"
+  - "FPGA"
+  - "ECE"
+
+discord_channels: []
+poll_interval_seconds: 900
