@@ -17,7 +17,7 @@ TG_CHAT_ID     = os.environ["TG_CHAT_ID"]
 DISCORD_TOKEN  = os.environ.get("DISCORD_TOKEN", "")
 
 # Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after you see clean [EVAL] logs
-SEARCH_WINDOW = "qdr:d"
+SEARCH_WINDOW = "qdr:h"
 
 # Fallback chain: tries the fastest/least congested free-tier models first
 GEMINI_MODELS = [
