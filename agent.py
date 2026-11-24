@@ -16,14 +16,12 @@ TG_BOT_TOKEN   = os.environ["TG_BOT_TOKEN"]
 TG_CHAT_ID     = os.environ["TG_CHAT_ID"]
 DISCORD_TOKEN  = os.environ.get("DISCORD_TOKEN", "")
 
-# Change "qdr:d" (past 24h) to "qdr:h" (past 1h) after you see clean [EVAL] logs
 SEARCH_WINDOW = "qdr:h"
 
-# Fallback chain: tries the fastest/least congested free-tier models first
 GEMINI_MODELS = [
+    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
     "gemini-4-hydrogen",
-    "gemini-3.6-flash",
     "gemini-3.8-flash",
 ]
 
@@ -109,34 +107,35 @@ def fetch_discord_posts():
     return posts
 
 def evaluate_posts_batch(posts):
-    """Evaluates all new posts in ONE API call, falling back across models if one hits 503/429."""
     formatted_posts = [
         {"id": i, "source": p["source"], "title": p["title"], "text": p["text"]}
         for i, p in enumerate(posts)
     ]
 
     prompt = f"""
-    You are a strict semiconductor job-hunting filter.
+    You are a strict front-end semiconductor job-hunting filter for India.
     Candidate Profile:
-    - Primary Roles (High Priority): {CONFIG['profile']['primary_roles']}
-    - Secondary Roles (Medium Priority): {CONFIG['profile']['secondary_roles']}
-    - Bonus Domain: {CONFIG['profile']['bonus_domain']}
+    - Target Roles ONLY: {CONFIG['profile']['primary_roles']}
     - Experience: {CONFIG['profile']['experience']}
-    - Target Companies: {CONFIG['profile']['target_companies']}
-    - Locations: {CONFIG['profile']['locations']}
+    - Top-Priority MNCs: {CONFIG['profile']['priority_mncs']}
+    - Target Locations: {CONFIG['profile']['locations']}
 
     Evaluate this JSON list of posts:
     {json.dumps(formatted_posts)}
 
     Strict Filtering Rules:
-    1. REJECT if the author is a job seeker ("I am looking for...", "#opentowork") or a VLSI coaching/training institute.
-    2. REJECT if the role explicitly requires 3+ years of experience (e.g., Senior, Staff, Principal, 5+ YoE).
-    3. ACCEPT if it is a real opening/referral for 0-2 YoE, 2026 grads, or unspecified experience in Primary or Secondary roles.
-    4. Set tag to "🔥 PRIMARY + ARCH" if it's RTL/DV + Computer Architecture, "⚡ PRIMARY" for RTL/DV, or "📌 SECONDARY" for Arch/DFT/STA.
-    5. Draft a sharp, 3-line cold DM/comment tailored to the post (leave empty string if is_match is false).
+    1. ACCEPT ONLY front-end RTL Design, Digital Design, ASIC Design, Design Verification (DV), Verification, or SoC Design roles.
+    2. REJECT Physical Design (PD), STA, DFT, Layout, Analog, Embedded Software, or IT roles.
+    3. REJECT if the author is a job seeker ("I am looking for...", "#opentowork") or a VLSI coaching/training institute (e.g., Maven Silicon, VLSI Guru, ChipEdge, Mosart, Takshila).
+    4. REJECT if the role explicitly requires 3+ years of experience (Senior, Staff, Principal, Lead, 4+ YoE).
+    5. ACCEPT 0-2 YoE, fresher, 2026 grad, or unspecified experience openings across BOTH top MNCs and other semiconductor companies/startups in India.
+    6. Tagging:
+       - Use "🔥 TOP MNC" if the company is a major semiconductor MNC ({CONFIG['profile']['priority_mncs']}).
+       - Use "⚡ OTHER CO" if it is a startup, mid-size product firm, or service company.
+    7. Draft a sharp, 3-line cold DM/comment tailored to the post (leave empty string if is_match is false).
 
     Return a JSON array with one object per post:
-    [{{"id": int, "is_match": bool, "tag": "string", "reason": "1-line summary", "draft_dm": "string"}}]
+    [{{"id": int, "is_match": bool, "tag": "string", "reason": "1-line summary including company & role", "draft_dm": "string"}}]
     """
 
     last_error = None
